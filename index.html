@@ -302,7 +302,7 @@ $("bPaste").onclick=async()=>{
 
 // ---------- nạp Excel ----------
 function readExcel(buf,fname){
-  const wb=XLSX.read(buf,{type:"array",cellStyles:true});
+  const wb=XLSX.read(buf,{type:"array",cellStyles:true,dateNF:"dd/mm/yyyy"});
   const base=(fname||"File").replace(/\.[^.]+$/,"");
   const cmp=v=>norm(String(v)).replace(/[^a-z0-9]/g,"");
   const isIni=s=>{s=String(s).trim();return s.length>=3&&!/\s/.test(s)&&/^["“”']?[A-ZĐ0-9"“”']+$/.test(s);};
@@ -328,12 +328,21 @@ function readExcel(buf,fname){
     const sample=A.slice(hr+1,hr+200).map(r=>r[c.q]).filter(v=>String(v).trim());
     if(!sample.length||sample.filter(isIni).length/sample.length>0.6)continue;
     used.push(sn);
-    const g=(r,i)=>i>=0?String(r[i]??"").trim():"";
-    for(let ri=hr+1;ri<A.length;ri++){const r=A[ri];const q=g(r,c.q);
+    // đọc ô: số % lấy giá trị thật (tránh làm tròn 5,5% -> 6%), còn lại lấy chữ hiển thị
+    const g=(r,i)=>{if(i<0)return "";const cell=ws[XLSX.utils.encode_cell({r:rowIdx,c:i})];
+      if(cell&&cell.t==="n"&&cell.z&&/%/.test(String(cell.z))){const v=cell.v;
+        if(Math.abs(v)<=10)return String(+(v*100).toFixed(6))+"%";
+        if(Number.isInteger(v)&&v>20000&&v<80000){const D=new Date(Date.UTC(1899,11,30)+v*864e5),p=n=>String(n).padStart(2,"0");return `${p(D.getUTCDate())}/${p(D.getUTCMonth()+1)}/${D.getUTCFullYear()}`;}
+        return String(v);}
+      const s=String(r[i]??"").trim();return /^-?\d+\.0+$/.test(s)?s.replace(/\.0+$/,""):s;};
+    let rowIdx=0;
+    for(let ri=hr+1;ri<A.length;ri++){const r=A[ri];rowIdx=ri;const q=g(r,c.q);
       if(!q||isIni(q)||cmp(q)==="cauhoi")continue;
       const cn=g(r,c.cat)||base;let ci=cats.indexOf(cn);if(ci<0){cats.push(cn);ci=cats.length-1;}
-      const o=c.opt.map(i=>{const t=g(r,i);return (isIni(t)&&t.length>5)||t===q?"":t;});
-      let ans=g(r,c.ans);if(isIni(ans)&&ans.length>5)ans="";
+      // ô rác = chuỗi ký tự đầu của chính câu hỏi, hoặc lặp lại câu hỏi
+      const iq=initials(q),junk=t=>{const x=cmp(t);return !x||x===cmp(q)||(x.length>=4&&(x===iq||iq.startsWith(x)||x.startsWith(iq)));};
+      const o=c.opt.map(i=>{const t=g(r,i);return junk(t)?"":t;});
+      let ans=g(r,c.ans);if(junk(ans))ans="";
       let lt="";
       if(hasOpt){
         if(c.let>=0)lt=g(r,c.let).toUpperCase().split(/[ ,;]+/).map(numTo).filter(Boolean).join("");
@@ -343,14 +352,24 @@ function readExcel(buf,fname){
           if((fg&&!/^(FF)?(FFFFFF|000000)$/i.test(fg))||(fc&&!/^(FF)?000000$/i.test(fc)))lt+=L[k];});}
         if(!lt&&ans){const k=o.findIndex(t=>t&&cmp(t)===cmp(ans));if(k>=0)lt=L[k];}
       }else if(c.let>=0&&!ans){const v=g(r,c.let);if(!numTo(v))ans=v;}
-      const k=L.indexOf(lt);if(k>=0&&o[k]&&cmp(o[k])===cmp(ans))ans="";
+      const k=L.indexOf(lt);if(k>=0&&o[k]&&ans&&sameAns(o[k],ans))ans="";
+      if(/^(true|false)$/i.test(ans))ans="";
       if(!lt&&!ans&&!o.some(Boolean))continue;
       rows.push([ci,q,...o,lt,ans,g(r,c.cc),g(r,c.dot)]);}
   }
   if(!rows.length)throw new Error("Không đọc được câu nào (cần có cột 'Câu hỏi')");
   // câu không có đáp án mà trùng câu hỏi đã có đáp án -> bỏ
   const hasA=r=>r[6]||r[7];const qa=new Set(rows.filter(hasA).map(r=>cmp(r[1])));
-  const out=rows.filter(r=>hasA(r)||!qa.has(cmp(r[1])));
+  let out=rows.filter(r=>hasA(r)||!qa.has(cmp(r[1])));
+  // gộp câu trùng chỉ khác định dạng số/ngày/% – giữ bản có phương án & định dạng đẹp
+  const bad=a=>(/^\d{5}(\.0+)?$/.test(a)?5:0)+(/^\d+\.0+$/.test(a)?3:0)+((/^(\d+)%$/.exec(a)||[])[1]>100?5:0);
+  const sc=r=>(r[6]?0:10)+bad(ansOf(r));
+  const G=new Map();out.forEach((r,i)=>{const q=cmp(r[1]);if(!G.has(q))G.set(q,[]);G.get(q).push(i);});
+  const drop=new Set();
+  for(const ids of G.values()){if(ids.length<2)continue;ids.sort((a,b)=>sc(out[a])-sc(out[b]));
+    const keep=[];for(const i of ids){const r=out[i],a=ansOf(r);
+      if(a&&keep.some(k=>sameAns(ansOf(out[k]),a)&&(!r[6]||!out[k][6]||sameOpts(r,out[k])))){drop.add(i);continue;}keep.push(i);}}
+  out=out.filter((_,i)=>!drop.has(i));
   return {cats,rows:out,sheets:used,dropped:rows.length-out.length};
 }
 function idb(){return new Promise((ok,no)=>{const r=indexedDB.open("dodapan",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);});}
@@ -358,6 +377,20 @@ async function idbSet(k,v){try{const d=await idb();d.transaction("kv","readwrite
 async function idbGet(k){try{const d=await idb();return await new Promise(ok=>{const q=d.transaction("kv").objectStore("kv").get(k);q.onsuccess=()=>ok(q.result);q.onerror=()=>ok(null);});}catch(e){return null;}}
 $("bLoad").onclick=()=>$("file").click();
 $("bAdd").onclick=()=>{if(!DB){$("file").click();return;}$("fileAdd").click();};
+// ---------- so khớp đáp án (chịu được khác định dạng số / % / ngày) ----------
+const MON={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+function canon(a){
+  const s=String(a??"").trim().replace(/\s+/g,""),out=new Set([norm(s).replace(/[^a-z0-9]/g,"")]);let m;
+  const dk=(d,mo,y)=>{out.add(`d${d}-${mo}-${y}`);out.add(`d${mo}-${d}-${y}`);if(y){out.add(`d${d}-${mo}-0`);out.add(`d${mo}-${d}-0`);}};
+  if((m=s.match(/^(-?\d+(?:[.,]\d+)?)%$/))){const v=parseFloat(m[1].replace(",","."));out.add("n"+(+(v/100).toFixed(6)));out.add("n"+v);}
+  else if(/^-?\d+(?:[.,]\d+)?$/.test(s)){const v=parseFloat(s.replace(",","."));out.add("n"+v);out.add("n"+(+(v*100).toFixed(6)));
+    if(Number.isInteger(v)&&v>20000&&v<80000){const D=new Date(Date.UTC(1899,11,30)+v*864e5);dk(D.getUTCDate(),D.getUTCMonth()+1,D.getUTCFullYear());}}
+  else if((m=s.match(/^(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?$/))){const y=m[3]?(m[3].length===2?2000+ +m[3]:+m[3]):0;dk(+m[1],+m[2],y);}
+  else if((m=s.match(/^(\d{1,2})-([a-z]{3})(?:-(\d{2,4}))?$/i))&&MON[m[2].toLowerCase()]){const y=m[3]?(m[3].length===2?2000+ +m[3]:+m[3]):0;dk(+m[1],MON[m[2].toLowerCase()],y);}
+  return out;}
+function sameOpts(x,y){const f=r=>r.slice(2,6).map(v=>norm(v).replace(/[^a-z0-9]/g,"")).filter(Boolean).sort().join("|");return f(x)===f(y);}
+function sameAns(a,b){const A=canon(a);for(const x of canon(b))if(A.has(x))return true;return false;}
+function ansOf(r){const k=L.indexOf(r[6][0]);return (k>=0&&r[2+k])||r[7]||"";}
 function keyOf(r){const lt=r[6],k=L.indexOf(lt[0]);const a=(k>=0&&r[2+k])||r[7]||lt;
   return norm(r[1]).replace(/[^a-z0-9]/g,"")+"|"+norm(a).replace(/[^a-z0-9]/g,"");}
 $("fileAdd").onchange=async e=>{
@@ -365,8 +398,10 @@ $("fileAdd").onchange=async e=>{
   $("cnt").textContent="Đang đọc "+fl.name+"…";await new Promise(r=>setTimeout(r,30));
   try{const N=readExcel(new Uint8Array(await fl.arrayBuffer()),fl.name);
     const seen=new Set(DB.rows.map(keyOf));let add=0,dup=0;
-    const cq=s=>norm(s).replace(/[^a-z0-9]/g,"");const qa=new Set(DB.rows.filter(r=>r[6]||r[7]).map(r=>cq(r[1])));
-    for(const r of N.rows){const k=keyOf(r);if(seen.has(k)||(!(r[6]||r[7])&&qa.has(cq(r[1])))){dup++;continue;}seen.add(k);
+    const cq=s=>norm(s).replace(/[^a-z0-9]/g,"");const qa=new Map();
+    const reg=r=>{const a=ansOf(r);if(!a)return;const q=cq(r[1]);if(!qa.has(q))qa.set(q,[]);qa.get(q).push(a);};DB.rows.forEach(reg);
+    for(const r of N.rows){const k=keyOf(r),a=ansOf(r),ex=qa.get(cq(r[1]));
+      if(seen.has(k)||(!a&&ex)||(a&&ex&&ex.some(x=>sameAns(x,a)))){dup++;continue;}seen.add(k);reg(r);
       const cn=N.cats[r[0]];let ci=DB.cats.indexOf(cn);if(ci<0){DB.cats.push(cn);ci=DB.cats.length-1;}
       DB.rows.push([ci,...r.slice(1)]);add++;}
     DB.name=(DB.name||"dữ liệu")+" + "+fl.name;DB.added=(DB.added||0)+add;
