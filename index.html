@@ -30,7 +30,13 @@ select{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--bd);bo
 .opt.ok{background:var(--ok);border-color:var(--okb);color:var(--okt);font-weight:600}
 .opt.ok::after{content:" ✓";color:var(--okb)}
 .cc{font-size:12px;color:var(--mu);margin-top:6px}
-.fz{background:var(--warn);border-radius:4px;padding:0 6px;font-size:12px;color:var(--tx)}
+.fz{border-radius:10px;padding:1px 8px;font-size:12px;font-weight:600;color:#fff;white-space:nowrap}
+.b-full{background:#2e7d32}.b-start{background:#1565c0}.b-mid{background:#5c7fa3}.b-ans{background:#7b5ea7}.b-fz{background:#e07b00}
+mark{background:#ffe066;color:#1d2733;border-radius:3px;padding:0 1px}
+.dim{opacity:.45}
+.q mark{box-shadow:0 0 0 1px #e6c200}
+.tools{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.tools button{padding:2px 8px;font-size:13px}
 .empty{text-align:center;color:var(--mu);padding:30px}
 .tip{font-size:13px;color:var(--mu);line-height:1.7}
 .tip kbd{border:1px solid var(--bd);border-radius:3px;padding:0 4px;background:var(--card)}
@@ -51,8 +57,13 @@ select{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--bd);bo
     <span>Đang dò: <code id="ini">—</code></span>
     <span id="cnt"></span>
     <select id="cat"><option value="-1">Tất cả chuyên đề</option></select>
-    <button id="bLoad" style="padding:2px 8px;font-size:13px">Nạp lại Excel…</button>
-        <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.xlsb" hidden>
+    <span class="tools">
+      <button id="bAdd" title="Gộp câu mới vào dữ liệu đang có, tự lọc trùng">➕ Nạp bổ sung</button>
+      <button id="bExport" title="Xuất toàn bộ dữ liệu đang dùng ra Excel">⬇ Xuất Excel</button>
+      <button id="bLoad" title="Thay toàn bộ dữ liệu bằng file mới">Nạp lại toàn bộ…</button>
+    </span>
+    <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.xlsb" hidden>
+    <input type="file" id="fileAdd" accept=".xlsx,.xlsm,.xls,.xlsb" hidden>
   </div>
 </div></div>
 <div class="res"><div class="wrap" id="out"></div></div>
@@ -110,7 +121,7 @@ function search(raw){
   for(let i=0;i<IDX.length;i++){
     if(cat>=0&&DB.rows[i][0]!==cat)continue;
     const x=IDX[i],p=x.qi.indexOf(q);
-    if(p>=0)hits.push({i,s:(p===0?0:1e4)+(x.qi.length-q.length)});
+    if(p>=0)hits.push({i,p,full:p===0&&x.qi.length===q.length,s:(p===0?0:1e4)+(x.qi.length-q.length)});
   }
   let mode="exact";
   if(hits.length<3&&q.length>=3){ // dò thêm trong nội dung đáp án
@@ -137,15 +148,46 @@ function search(raw){
 
 // ---------- hiển thị ----------
 function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+// ---------- tô màu phần khớp ----------
+function tokPos(s){const out=[];let cur=null;
+  for(let i=0;i<s.length;i++){const b=norm(s[i]);
+    if(/^[a-z0-9]$/.test(b)){if(cur){cur.e=i+1;cur.t+=b;}else cur={s:i,e:i+1,t:b};}
+    else if(b===""&&cur){cur.e=i+1;}
+    else if(cur){out.push(cur);cur=null;}}
+  if(cur)out.push(cur);return out;}
+function hl(text,q,fuzzy,dim){
+  const tk=tokPos(text);let ini="",map=[];
+  tk.forEach((t,k)=>{const pc=/^\d+$/.test(t.t)?t.t:t.t[0];ini+=pc;for(const _ of pc)map.push(k);});
+  const mk=new Set();
+  const p=fuzzy?-1:ini.indexOf(q);
+  if(p>=0){for(let j=p;j<p+q.length;j++)mk.add(map[j]);}
+  else{const qt=trigrams(q);for(let i=0;i+3<=ini.length;i++)if(qt.has(ini.substr(i,3)))for(let j=i;j<i+3;j++)mk.add(map[j]);}
+  let h="",last=0,open=false;const dm=dim&&mk.size>0;
+  tk.forEach((t,k)=>{const m=mk.has(k);
+    if(open&&!m){h+="</mark>";open=false;}
+    h+=esc(text.slice(last,t.s));
+    if(m&&!open){h+="<mark>";open=true;}
+    const w=esc(text.slice(t.s,t.e));h+=(!m&&dm)?`<span class="dim">${w}</span>`:w;last=t.e;});
+  if(open)h+="</mark>";h+=esc(text.slice(last));
+  return {h,n:mk.size,tot:tk.length};}
+let CUR={q:"",mode:""};
 function card(h){
   const r=DB.rows[h.i],let_=r[6];
+  const fz=CUR.mode==="fuzzy";
+  const Q=h.ans?{h:esc(r[1])}:hl(r[1],CUR.q,fz,fz);
+  const ho=t=>h.ans?hl(t,CUR.q,false,false).h:esc(t);
   let o=`<div class="card"><div class="h"><span>${esc(DB.cats[r[0]]||"")}${r[9]?" · "+esc(r[9]):""}</span>`;
-  o+=h.pct?`<span class="fz">Giống ${h.pct}%</span>`:(h.ans?`<span class="fz">Khớp trong đáp án</span>`:"");
-  o+=`</div><div class="q">${esc(r[1])}</div>`;
+  const cov=Q.tot?` · ${Q.n}/${Q.tot} từ`:"";
+  o+=h.ans?`<span class="fz b-ans">Khớp trong đáp án</span>`
+    :fz?`<span class="fz b-fz">Gần đúng ${h.pct}%${cov}</span>`
+    :h.full?`<span class="fz b-full">Khớp trọn câu</span>`
+    :h.p===0?`<span class="fz b-start">Khớp đầu câu${cov}</span>`
+    :`<span class="fz b-mid">Khớp giữa câu${cov}</span>`;
+  o+=`</div><div class="q">${Q.h}</div>`;
   let hasOpt=false;
   for(let k=0;k<4;k++){const t=r[2+k];if(!t)continue;hasOpt=true;
-    o+=`<div class="opt${let_.includes(L[k])?" ok":""}"><b>${L[k]}.</b>${esc(t)}</div>`;}
-  if(r[7])o+=`<div class="opt ok"><b>→</b>${esc(r[7])}</div>`;
+    o+=`<div class="opt${let_.includes(L[k])?" ok":""}"><b>${L[k]}.</b>${ho(t)}</div>`;}
+  if(r[7])o+=`<div class="opt ok"><b>→</b>${ho(r[7])}</div>`;
   else if(!hasOpt)o+=`<div class="opt">(không có nội dung đáp án)</div>`;
   if(r[8])o+=`<div class="cc">Căn cứ: ${esc(r[8])}</div>`;
   return o+"</div>";
@@ -158,6 +200,7 @@ function run(){
   if(!R){$("ini").textContent="—";$("cnt").textContent="";$("out").innerHTML=tipHtml();return;}
   $("ini").textContent=R.q;
   $("cnt").textContent=R.total?`${R.total} kết quả${R.mode==="fuzzy"?" gần đúng":""} · ${ms} ms`:`0 kết quả · ${ms} ms`;
+  CUR={q:R.q,mode:R.mode};
   $("out").innerHTML=R.hits.length?R.hits.map(card).join(""):`<div class="empty">Không tìm thấy. Thử gõ ít chữ hơn hoặc bỏ lọc chuyên đề.</div>`;
   window.scrollTo(0,0);
 }
@@ -208,6 +251,32 @@ function idb(){return new Promise((ok,no)=>{const r=indexedDB.open("dodapan",1);
 async function idbSet(k,v){try{const d=await idb();d.transaction("kv","readwrite").objectStore("kv").put(v,k);}catch(e){}}
 async function idbGet(k){try{const d=await idb();return await new Promise(ok=>{const q=d.transaction("kv").objectStore("kv").get(k);q.onsuccess=()=>ok(q.result);q.onerror=()=>ok(null);});}catch(e){return null;}}
 $("bLoad").onclick=()=>$("file").click();
+$("bAdd").onclick=()=>{if(!DB){$("file").click();return;}$("fileAdd").click();};
+function keyOf(r){const lt=r[6],k=L.indexOf(lt[0]);const a=(k>=0&&r[2+k])||r[7]||lt;
+  return norm(r[1]).replace(/[^a-z0-9]/g,"")+"|"+norm(a).replace(/[^a-z0-9]/g,"");}
+$("fileAdd").onchange=async e=>{
+  const fl=e.target.files[0];if(!fl)return;
+  $("cnt").textContent="Đang đọc "+fl.name+"…";await new Promise(r=>setTimeout(r,30));
+  try{const N=readExcel(new Uint8Array(await fl.arrayBuffer()));
+    const seen=new Set(DB.rows.map(keyOf));let add=0,dup=0;
+    for(const r of N.rows){const k=keyOf(r);if(seen.has(k)){dup++;continue;}seen.add(k);
+      const cn=N.cats[r[0]];let ci=DB.cats.indexOf(cn);if(ci<0){DB.cats.push(cn);ci=DB.cats.length-1;}
+      DB.rows.push([ci,...r.slice(1)]);add++;}
+    DB.name=(DB.name||"dữ liệu")+" + "+fl.name;DB.added=(DB.added||0)+add;
+    buildIndex();await idbSet("db",DB);setSrc();run();
+    $("cnt").textContent=`✔ Thêm ${add.toLocaleString("vi-VN")} câu mới, bỏ ${dup.toLocaleString("vi-VN")} câu trùng. Nên bấm "Xuất Excel" để lưu bản gộp về Drive.`;}
+  catch(err){$("cnt").textContent="Lỗi: "+err.message;}
+  e.target.value="";};
+$("bExport").onclick=()=>{
+  if(!DB)return;
+  const aoa=[["STT","Chuyên đề","Câu hỏi","Đáp án A","Đáp án B","Đáp án C","Đáp án D","Đáp án đúng","Nội dung đáp án đúng","Căn cứ","Đợt"]];
+  DB.rows.forEach((r,i)=>{const k=L.indexOf(r[6][0]);
+    aoa.push([i+1,DB.cats[r[0]]||"",r[1],r[2],r[3],r[4],r[5],r[6],r[7]||(k>=0?r[2+k]:""),r[8],r[9]]);});
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"]=[{wch:6},{wch:22},{wch:60},{wch:40},{wch:40},{wch:40},{wch:40},{wch:8},{wch:50},{wch:30},{wch:14}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Ngân hàng câu hỏi");
+  const d=new Date(),p=n=>String(n).padStart(2,"0");
+  XLSX.writeFile(wb,`Ngan_hang_cau_hoi_da_gop_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.xlsx`);};
 $("file").onchange=async e=>{
   const fl=e.target.files[0];if(!fl)return;
   $("cnt").textContent="Đang đọc "+fl.name+"…";await new Promise(r=>setTimeout(r,30));
