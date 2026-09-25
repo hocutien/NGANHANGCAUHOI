@@ -344,6 +344,7 @@ function readExcel(buf,fname){
         if(!lt&&ans){const k=o.findIndex(t=>t&&cmp(t)===cmp(ans));if(k>=0)lt=L[k];}
       }else if(c.let>=0&&!ans){const v=g(r,c.let);if(!numTo(v))ans=v;}
       const k=L.indexOf(lt);if(k>=0&&o[k]&&cmp(o[k])===cmp(ans))ans="";
+      if(!lt&&!ans&&!o.some(Boolean))continue;
       rows.push([ci,q,...o,lt,ans,g(r,c.cc),g(r,c.dot)]);}
   }
   if(!rows.length)throw new Error("Không đọc được câu nào (cần có cột 'Câu hỏi')");
