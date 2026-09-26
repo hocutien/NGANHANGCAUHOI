@@ -113,7 +113,11 @@ button.img{background:#2e7d32;color:#fff;border-color:#2e7d32;font-weight:600}
     <label>API key <input type="password" id="aiKey" placeholder="Dán API key Gemini (lưu trên máy này)" autocomplete="off"></label>
     <label>Model <input type="text" id="aiModel" list="aiModels" value="gemini-flash-latest"></label>
     <datalist id="aiModels"><option value="gemini-flash-latest"><option value="gemini-flash-lite-latest"><option value="gemini-pro-latest"></datalist>
-    <label><input type="checkbox" id="aiOcr" checked> Dùng Gemini để đọc ảnh khi có key (chính xác hơn; không có mạng thì tự dùng bộ đọc trên máy)</label>
+    <label>Ưu tiên quét ảnh <select id="aiMode">
+      <option value="ai">AI (Gemini) trước – lỗi/mất mạng thì tự chuyển sang máy</option>
+      <option value="hybrid">Máy trước – dò không ra thì AI đọc lại</option>
+      <option value="local">Chỉ máy (offline, không gửi ảnh đi)</option>
+      <option value="aionly">Chỉ AI (Gemini)</option></select></label>
     <label><input type="checkbox" id="aiAuto" checked> Tự động hỏi AI khi không tìm thấy trong ngân hàng đề</label>
     <span class="muted">Lấy key miễn phí tại aistudio.google.com/apikey · Key chỉ lưu trong trình duyệt của máy này, không nằm trong trang web.</span>
     <div><button id="aiSave" class="main" style="flex:none;font-size:14px;padding:4px 14px">Lưu</button> <span id="aiMsg" class="muted"></span></div>
@@ -798,17 +802,19 @@ function tipHtml(){return `<div class="card tip">
 • Số được giữ nguyên cụm: "QC 346" → <code>q346</code>.<br>
 • Ô <b>Nội dung đầy đủ</b>: dán/gõ câu hỏi (có dấu hay không dấu, kèm "Câu 12:", A/B/C/D đều được) → dò theo từ: <b>khớp nguyên cụm</b> → <b>đủ các từ</b> → <b>trùng nhiều từ nhất</b>.<br>
 • <b>📷 Chụp ảnh</b> (điện thoại): mở thẳng camera sau – chụp rõ, thẳng, đủ câu hỏi và các phương án, tránh lóa.<br>
+• <b>Cách quét ảnh</b> (chọn ở ⚙ AI → Ưu tiên quét ảnh): <b>AI trước</b> (mặc định khi có key, lỗi thì tự dùng máy) · <b>Máy trước, dò không ra thì AI đọc lại</b> · <b>Chỉ máy</b> (offline) · <b>Chỉ AI</b>. Chưa có key thì luôn đọc bằng máy. Dòng trạng thái ghi rõ đã đọc bằng gì.<br>
 • <b>🖼 Hình ảnh</b>: Ctrl+V / kéo thả ảnh chụp đề → tự đọc câu hỏi + phương án, dò và ưu tiên câu <b>khớp cả phương án</b>. Không có trong ngân hàng đề → <b>gợi ý của AI</b> (cần API key ở ⚙ AI).<br>
 • <b>📚 Văn bản</b>: nạp thư mục/tệp quy định (PDF, DOCX, TXT). Câu không có trong ngân hàng đề → hiện đoạn điều khoản liên quan + phương án khớp văn bản nhất; AI (nếu có key) trả lời dựa trên đúng các đoạn đó.<br>
 • <kbd>Esc</kbd> xóa ô đang gõ (nhấn ngoài ô = xóa cả 2) · nút <b>📋 Dán</b> đọc clipboard vào ô Nội dung và dò ngay.<br>
 Dữ liệu: <b>${DB.rows.length.toLocaleString("vi-VN")}</b> câu, ${DB.cats.length} chuyên đề.</div>`;}
 
 // ================= ẢNH & AI =================
-const CFG={key:"",model:"gemini-flash-latest",ocr:true,auto:true};
+const CFG={key:"",model:"gemini-flash-latest",ocr:true,auto:true,mode:"ai"};
 try{Object.assign(CFG,JSON.parse(localStorage.getItem("dodapan_ai")||"{}"));}catch(e){}
-$("aiKey").value=CFG.key;$("aiModel").value=CFG.model;$("aiOcr").checked=CFG.ocr;$("aiAuto").checked=CFG.auto;
+if(CFG.ocr===false&&!localStorage.getItem("dodapan_mode_set"))CFG.mode="local";
+$("aiKey").value=CFG.key;$("aiModel").value=CFG.model;$("aiMode").value=CFG.mode||"ai";$("aiAuto").checked=CFG.auto;
 $("bAI").onclick=()=>{$("aiPanel").hidden=!$("aiPanel").hidden;};
-$("aiSave").onclick=()=>{CFG.key=$("aiKey").value.trim();CFG.model=$("aiModel").value.trim()||"gemini-flash-latest";CFG.ocr=$("aiOcr").checked;CFG.auto=$("aiAuto").checked;
+$("aiSave").onclick=()=>{CFG.key=$("aiKey").value.trim();CFG.model=$("aiModel").value.trim()||"gemini-flash-latest";CFG.mode=$("aiMode").value;try{localStorage.setItem("dodapan_mode_set","1");}catch(e){}CFG.auto=$("aiAuto").checked;
   try{localStorage.setItem("dodapan_ai",JSON.stringify(CFG));$("aiMsg").textContent="✔ Đã lưu";}catch(e){$("aiMsg").textContent="Đã áp dụng (trình duyệt không cho lưu lâu dài)";}
   $("bAI").textContent=CFG.key?"⚙ AI ✔":"⚙ AI";setTimeout(()=>{$("aiPanel").hidden=true;},600);run();};
 if(CFG.key)$("bAI").textContent="⚙ AI ✔";
@@ -964,13 +970,17 @@ let LASTIMG=null,LASTQF="";
 // ---- hàng đợi nhiều ảnh ----
 const IMGQ=[];let IMGI=-1,IMGBUSY=false;
 async function readOne(blob){
-  const t0=performance.now();let text="",how="",GERR="";
-  if(CFG.key&&CFG.ocr){try{setSt("Đang đọc ảnh bằng Gemini…");text=await ocrGemini(blob);how="Gemini";}
-    catch(e){GERR=e.message;setSt("Gemini lỗi ("+e.message+") – chuyển sang bộ đọc trên máy…");}
-    if(!text&&!GERR)GERR="Gemini không đọc được câu hỏi trong ảnh";}
-  if(!text){text=await ocrLocal(blob);how="trên máy"+(CFG.key&&CFG.ocr&&GERR?" (Gemini: "+GERR.slice(0,80)+")":"");}
+  const t0=performance.now();let text="",how="",note="";
+  const mode=CFG.key?(CFG.mode||"ai"):"local";           // không có key => luôn đọc bằng máy
+  const byAI=async()=>{setSt("Đang đọc ảnh bằng AI (Gemini)…");const x=await ocrGemini(blob);if(!x)throw new Error("AI không thấy câu hỏi trong ảnh");return x;};
+  const byLocal=async()=>ocrLocal(blob);
+  if(mode==="ai"){try{text=await byAI();how="AI (Gemini)";}catch(e){note="AI lỗi: "+e.message.slice(0,80)+" → đã đọc bằng máy";text=await byLocal();how="máy";}}
+  else if(mode==="aionly"){text=await byAI();how="AI (Gemini)";}
+  else if(mode==="hybrid"){text=await byLocal();how="máy";
+    if(qaScore(text)<100){try{const x=await byAI();text=x;how="máy → AI đọc lại (máy dò không ra)";}catch(e){note="AI lỗi: "+e.message.slice(0,80);}}}
+  else{text=await byLocal();how=CFG.key?"máy (chế độ chỉ máy)":"máy (chưa có API key)";}
   const P=parseQA(text);
-  return {qf:P.q+(P.opts.length?"\n"+P.opts.slice(0,6).map((o,i)=>"ABCDEF"[i]+". "+o).join("\n"):""),info:`Đọc ${how} · ${((performance.now()-t0)/1000).toFixed(1)} s · ${P.opts.length} phương án`};
+  return {qf:P.q+(P.opts.length?"\n"+P.opts.slice(0,6).map((o,i)=>"ABCDEF"[i]+". "+o).join("\n"):""),info:`Đọc bằng ${how} · ${((performance.now()-t0)/1000).toFixed(1)} s · ${P.opts.length} phương án${note?" · "+note:""}`};
 }
 function showImg(i,scroll){
   const it=IMGQ[i];if(!it)return;IMGI=i;LASTIMG=it.blob;
