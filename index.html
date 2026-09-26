@@ -89,12 +89,14 @@ button.img{background:#2e7d32;color:#fff;border-color:#2e7d32;font-weight:600}
     <span class="lbl">🖼 Hình ảnh</span>
     <div class="imgbar">
       <button class="img" id="bImg" title="Dán ảnh từ clipboard (hoặc Ctrl+V ở bất kỳ đâu)">🖼 Dán ảnh</button>
+      <button id="bCam" class="img" title="Mở camera điện thoại để chụp đề">📷 Chụp ảnh</button>
       <button id="bPick">📂 Chọn ảnh</button>
       <img id="thumb" alt="" hidden>
       <span class="muted" id="imgSt">Ctrl+V ảnh chụp đề · kéo thả ảnh vào trang</span>
       <button id="bAI" style="margin-left:auto" title="Cài đặt Gemini API">⚙ AI</button>
     </div>
     <input type="file" id="fileImg" accept="image/*" hidden>
+    <input type="file" id="fileCam" accept="image/*" capture="environment" hidden>
   </div>
   <div class="panel" id="aiPanel" hidden>
     <b>Cài đặt trí tuệ nhân tạo (Gemini)</b>
@@ -699,6 +701,7 @@ function tipHtml(){return `<div class="card tip">
 <b>Hướng dẫn</b> <button style="float:right;padding:0 8px" onclick="document.getElementById('help').hidden=true">✕</button><br>– 2 ô tìm, dùng riêng hoặc kết hợp (điền cả 2 = lọc câu thỏa cả hai)<br>• Gõ <b>chữ cái đầu</b> các từ liên tiếp, không dấu, viết liền: <code>ttcbl</code> → "<u>T</u>hỏa <u>t</u>huận <u>c</u>ấp <u>b</u>ảo <u>l</u>ãnh".<br>
 • Số được giữ nguyên cụm: "QC 346" → <code>q346</code>.<br>
 • Ô <b>Nội dung đầy đủ</b>: dán/gõ câu hỏi (có dấu hay không dấu, kèm "Câu 12:", A/B/C/D đều được) → dò theo từ: <b>khớp nguyên cụm</b> → <b>đủ các từ</b> → <b>trùng nhiều từ nhất</b>.<br>
+• <b>📷 Chụp ảnh</b> (điện thoại): mở thẳng camera sau – chụp rõ, thẳng, đủ câu hỏi và các phương án, tránh lóa.<br>
 • <b>🖼 Hình ảnh</b>: Ctrl+V / kéo thả ảnh chụp đề → tự đọc câu hỏi + phương án, dò và ưu tiên câu <b>khớp cả phương án</b>. Không có trong ngân hàng đề → <b>gợi ý của AI</b> (cần API key ở ⚙ AI).<br>
 • <kbd>Esc</kbd> xóa ô đang gõ (nhấn ngoài ô = xóa cả 2) · nút <b>📋 Dán</b> đọc clipboard vào ô Nội dung và dò ngay.<br>
 Dữ liệu: <b>${DB.rows.length.toLocaleString("vi-VN")}</b> câu, ${DB.cats.length} chuyên đề.</div>`;}
@@ -826,6 +829,8 @@ async function handleImage(blob){
 }
 $("thumb").onclick=()=>$("thumb").classList.toggle("big");
 $("bPick").onclick=()=>$("fileImg").click();
+$("bCam").onclick=()=>$("fileCam").click();
+$("fileCam").onchange=e=>{handleImage(e.target.files[0]);e.target.value="";};
 $("fileImg").onchange=e=>{handleImage(e.target.files[0]);e.target.value="";};
 $("bImg").onclick=async()=>{
   try{const items=await navigator.clipboard.read();
