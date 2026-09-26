@@ -455,29 +455,70 @@ function cleanQ(raw){
   return s;
 }
 function nt(s){return norm(s).replace(/[^a-z0-9]+/g," ").trim();}
+const UI_RE0=/(kiem tra ky|cau hoi \d+ trong so|thoi gian con lai|tiep theo|nop bai|danh sach cau hoi|quay lai|mozilla|google chrome|firefox|elearning|http|contentserver|saba|dang xem o che do|nv ke toan|chuc danh chuc vu)/;
+const UI_RE={test:x=>UI_RE0.test(nt(x))};
+const isWord=w=>/^[A-Za-zÀ-ỹĐđ]{2,}[.,;:?!)]*$/.test(w)&&/[aeiouyàáảãạăắằẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵ]/i.test(w);
+function stripUI(x){
+  x=x.replace(/^.*?k[iíìỉ]\S*m\s*tra\s*k\S*\s*[^)]{0,12}\)\s*/i,"");
+  x=x.replace(/^.*?c[oòó]n\s*l[aạ]i\s*:?\s*[\d: ]{3,8}\s*/i,"");
+  x=x.replace(/^.*?trong\s*s[oốồề]\s*\d{2,3}\s*/i,"");
+  return x;}
+function cleanLine(x){
+  x=stripUI(x);
+  x=x.split(/[ \t]{5,}/).sort((a,b)=>b.length-a.length)[0]||"";           // giữ đoạn dài nhất khi có khoảng trắng lớn
+  let tk=x.trim().split(/\s+/);
+  const junkLead=w=>/^[|(){}\[\]®©ØøÖöÔôOo0°•○●◯◉@Q_~ˆ`'".,\-–:;¡!]+$/.test(w)||/^[|(]+\S{0,1}$/.test(w);
+  const up=w=>w.length<=3&&w===w.toUpperCase()&&w!==w.toLowerCase();
+  const junkTail=w=>(/^([|IlíiÍ!]{1,3}|[^0-9A-Za-zÀ-ỹ]+)$/.test(w)||up(w)||(!isWord(w)&&!/\d/.test(w)&&w.length<=3))&&!/^(A|B|C|D)\.$/.test(w);
+  while(tk.length&&junkLead(tk[0]))tk.shift();
+  while(tk.length>1&&junkTail(tk[tk.length-1])&&!/[?:]$/.test(tk[tk.length-1]))tk.pop();
+  return tk.join(" ");
+}
 function parseQA(text){
   let s=String(text||"").replace(/\r/g,"").trim();
   s=s.replace(/^\s*(c[aâ]u(\s*h[oỏ]i)?\s*(s[oố])?\s*\d+\s*[:.)\-–]?)\s*/i,"");
-  const tidy=x=>x.replace(/^[\s○●◯◉•◦oO0°©®Øø@Q|]{1,3}\s+(?=\S)/,"").replace(/(\s+[oO0°○●◯•©®Øø|]{1,2})+\s*$/,"").trim();
-  // bỏ phần rác sau khoảng trắng dài (cột khác / viền màn hình) và dòng rác
-  s=s.split("\n").map(x=>x.split(/[ \t]{5,}/)[0]).filter(x=>(x.match(/[0-9A-Za-zÀ-ỹ]/g)||[]).length>=3||/[?:]\s*$/.test(x)&&/[A-Za-zÀ-ỹ]/.test(x)).join("\n");
-  s=s.replace(/(^|\n|\s)[o0°○●◯◉•©®]{1,2}\s+(?=[A-Da-d]\s*[.):])/g,"$1");
-  s=s.split("\n").map(tidy).join("\n");
+  // 1) có nhãn A. B. C. D.
+  const flat=s.split("\n").map(cleanLine).join("\n");
   const re=/(^|\n|\s)([A-Da-d])\s*[.):](?:\s+|(?=[A-ZĐÀ-Ỹ0-9]))/g;let m,marks=[],want=0;
-  while((m=re.exec(s))){const L0=m[2].toUpperCase().charCodeAt(0)-65;if(L0===want){marks.push({i:m.index+m[1].length,e:re.lastIndex});want++;if(want>3)break;}}
-  if(marks.length>=2){
-    const q=tidy(s.slice(0,marks[0].i).replace(/\s+/g," "));
-    const opts=marks.map((k,j)=>tidy(s.slice(k.e,j+1<marks.length?marks[j+1].i:s.length).replace(/\s+/g," "))).filter(Boolean);
-    return {q,opts};}
-  const lines=s.split("\n").map(x=>x.replace(/^[\s○●◯◉•◦▪■□☐☑✓✔O0()\[\]-]{1,3}\s+/,"").trim()).filter(Boolean);
-  if(lines.length>=3){const k=lines.findIndex(x=>/[?:]$/.test(x));
-    if(k>=0&&k<lines.length-1){return {q:lines.slice(0,k+1).join(" "),opts:lines.slice(k+1,k+7)};}}
-  return {q:s.replace(/\s+/g," "),opts:[]};
+  while((m=re.exec(flat))){const L0=m[2].toUpperCase().charCodeAt(0)-65;if(L0===want){marks.push({i:m.index+m[1].length,e:re.lastIndex});want++;if(want>3)break;}}
+  if(marks.length>=2&&marks[0].i>10){
+    const q=flat.slice(0,marks[0].i).replace(/\s+/g," ").trim();
+    const opts=marks.map((k,j)=>flat.slice(k.e,j+1<marks.length?marks[j+1].i:flat.length).replace(/\s+/g," ").trim()).filter(Boolean);
+    return {q:q.replace(/^(c[aâ]u\s*\d+\s*[:.)]?)\s*/i,""),opts};}
+  // 2) không có nhãn: lọc dòng giao diện + dòng rác (nhiễu sọc màn hình); đánh dấu dòng bắt đầu bằng nút tròn
+  const RADIO=/^[\s|.]*(?:[(○●◯◉•◦oO0°©®Øø@QÖöÔô]|\.\.|C\)|L[àa](?=\s{2}))\s+(?=\S)/;
+  let rows=s.split("\n").map(r=>({r:RADIO.test(r),x:cleanLine(r)})).filter(o=>{const x=o.x;
+    if(!x||UI_RE.test(x))return false;
+    const tk=x.split(/\s+/),w=tk.filter(isWord).length;
+    const one=tk.length===1&&isWord(x)&&!/^[A-ZĐ]+$/.test(x)&&(/[À-ỹĐđ]/.test(x)||x.length>=3);
+    return (w>=2&&w/tk.length>=0.5)||one||(/[?:]$/.test(x)&&w>=1)||(/^\d/.test(x)&&w>=1&&tk.length<=6);});
+  const fl=rows.map((o,i)=>o.r?i:-1).filter(i=>i>0);
+  if(fl.length>=2){const q=rows.slice(0,fl[0]).map(o=>o.x).join(" ");const opts=[];
+    for(let j=0;j<fl.length&&opts.length<4;j++)opts.push(rows.slice(fl[j],j+1<fl.length?fl[j+1]:Math.min(rows.length,fl[j]+2)).map(o=>o.x).join(" "));
+    // dòng cuối không có nút tròn nhưng liền sau các phương án (vd nút bị đọc thành "..") 
+    const lastEnd=fl[fl.length-1]+1;if(opts.length<4&&lastEnd<rows.length&&rows.length-lastEnd<=2)opts.push(rows[lastEnd].x);
+    return {q:q.replace(/^(c[aâ]u\s*\d+\s*[:.)]?)\s*/i,""),opts:opts.slice(0,4)};}
+  let lines=rows.map(o=>o.x);
+  lines=lines.map(x=>x.replace(/^(c[aâ]u\s*\d+\s*[:.)]?)\s*/i,""));
+  if(!lines.length)return {q:"",opts:[]};
+  const k=lines.findIndex(x=>/[?:]$/.test(x));
+  if(k>=0&&k<lines.length-1)return {q:lines.slice(0,k+1).join(" "),opts:lines.slice(k+1,k+5)};
+  if(lines.length>=5)return {q:lines.slice(0,lines.length-4).join(" "),opts:lines.slice(-4)};
+  if(lines.length>=3)return {q:lines[0],opts:lines.slice(1)};
+  return {q:lines.join(" "),opts:[]};
 }
 function wordSim(a,b){const A=new Set(nt(a).split(" ").filter(Boolean)),B=new Set(nt(b).split(" ").filter(Boolean));
   if(!A.size||!B.size)return 0;let c=0;for(const w of A)if(B.has(w))c++;return c/Math.max(A.size,B.size);}
+function optSim(a,b){
+  if(sameAns(a,b))return true;
+  const A=nt(a).split(" ").filter(Boolean),B=nt(b).split(" ").filter(Boolean);if(!A.length||!B.length)return false;
+  const dA=A.filter(w=>/\d/.test(w)),dB=B.filter(w=>/\d/.test(w));
+  const sub=(s,l)=>{let i=0;for(const w of l)if(i<s.length&&w===s[i])i++;return i===s.length;};
+  if((dA.length||dB.length)&&!(dA.length<=dB.length?sub(dA,dB):sub(dB,dA)))return false;
+  const SA=new Set(A),SB=new Set(B);let c=0;for(const w of SA)if(SB.has(w))c++;
+  return c/Math.max(SA.size,SB.size)>=0.75||(c>=3&&c/Math.min(SA.size,SB.size)>=0.8);}
 function optMatch(row,opts){let m=0;const ro=[row[2],row[3],row[4],row[5]].filter(Boolean);
-  for(const o of opts)if(ro.some(x=>sameAns(x,o)||wordSim(x,o)>=0.75))m++;return m;}
+  for(const o of opts)if(ro.some(x=>optSim(x,o)))m++;return m;}
 function trigrams(s){const g=new Set();for(let i=0;i+3<=s.length;i++)g.add(s.substr(i,3));return g;}
 
 function buildIndex(){
@@ -557,7 +598,12 @@ function search(){
     const P=parseQA(vf);F.opts=P.opts;
     if(P.opts.length>=2){const need=Math.min(2,P.opts.length);
       F.hits.slice(0,120).forEach(h=>{if(!h.ans)h.img=optMatch(DB.rows[h.i],P.opts);});
-      const kk=h=>h.img>=need?-(h.img||0):1;F.hits.sort((a,b)=>kk(a)-kk(b)||a.s-b.s);F.need=need;}
+      // tra ngược theo phương án khi câu hỏi đọc sai / bị cắt
+      if(P.opts.length>=3&&!F.hits.some(h=>h.img>=3)){const seen=new Set(F.hits.map(h=>h.i));
+        for(let i=0;i<DB.rows.length;i++){if(seen.has(i)||(cat>=0&&DB.rows[i][0]!==cat)||!DB.rows[i][6])continue;
+          const mm=optMatch(DB.rows[i],P.opts);if(mm>=3){const ws=wordSim(DB.rows[i][1],P.q);F.hits.push({i,t:4,img:mm,pct:Math.round(ws*100),s:4e4-ws*1e3});}}
+        F.total=F.hits.length;}
+      const kk=h=>h.img>=need?-(h.img||0)*10-(h.t===4?0:1):1;F.hits.sort((a,b)=>kk(a)-kk(b)||a.s-b.s);F.need=need;}
     F.hits=F.hits.slice(0,30);return F;}
   const I=searchIni(vi,cat);if(!I)return null;I.hits=I.hits.slice(0,I.mode==="fuzzy"?8:30);return I;
 }
@@ -609,6 +655,7 @@ function card(h){
   o+=FU&&!h.ans?(h.full?`<span class="fz b-full">Khớp trọn câu</span>`
       :h.t===0?`<span class="fz b-start">Khớp nguyên cụm${cov}</span>`
       :h.t===1?`<span class="fz b-mid">Đủ các từ${cov}</span>`
+      :h.t===4?`<span class="fz b-fz">Khớp theo phương án · câu hỏi giống ${h.pct}%</span>`
       :`<span class="fz b-fz">Trùng ${h.pct}% từ${cov}</span>`)
     :h.ans?`<span class="fz b-ans">Khớp trong đáp án</span>`
     :fz?`<span class="fz b-fz">Gần đúng ${h.pct}%${cov}</span>`
@@ -641,8 +688,8 @@ function run(){
   // có tìm thấy chắc chắn không?
   let nf=false;
   if(R.mode==="full"&&$("qf").value.trim().length>=12){
-    let strong=R.hits.filter(h=>!h.ans&&(h.t<2||h.pct>=70));
-    if((R.opts||[]).length>=2)strong=strong.filter(h=>h.img>=R.need);
+    const no=(R.opts||[]).length;
+    const strong=R.hits.filter(h=>!h.ans&&(((h.t<2||h.pct>=70)&&(no<2||h.img>=R.need))||(h.img>=3&&(h.pct>=45||h.t<2))));
     nf=!strong.length;}
   $("out").innerHTML=(nf?aiCardHtml():"")+html;
   if(nf)aiMaybe();
@@ -666,9 +713,9 @@ $("aiSave").onclick=()=>{CFG.key=$("aiKey").value.trim();CFG.model=$("aiModel").
   $("bAI").textContent=CFG.key?"⚙ AI ✔":"⚙ AI";setTimeout(()=>{$("aiPanel").hidden=true;},600);run();};
 if(CFG.key)$("bAI").textContent="⚙ AI ✔";
 
-async function small(blob){const c=await prep(blob);const k=Math.min(1,1600/Math.max(c.width,c.height));
-  const d=document.createElement("canvas");d.width=Math.round(c.width*k);d.height=Math.round(c.height*k);d.getContext("2d").drawImage(c,0,0,d.width,d.height);
-  return d.toDataURL("image/jpeg",0.85).split(",")[1];}
+async function small(blob){const img=await createImageBitmap(blob);const k=Math.min(1,2000/Math.max(img.width,img.height));
+  const d=document.createElement("canvas");d.width=Math.round(img.width*k);d.height=Math.round(img.height*k);const x=d.getContext("2d");x.imageSmoothingQuality="high";x.drawImage(img,0,0,d.width,d.height);
+  return d.toDataURL("image/jpeg",0.88).split(",")[1];}
 function b64(blob){return new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]);r.onerror=no;r.readAsDataURL(blob);});}
 let NOTHINK=true;
 async function gemini(parts,json=true){
@@ -699,17 +746,19 @@ async function tessWorker(){
   await TW.setParameters({preserve_interword_spaces:"1"});
   return TW;
 }
-async function prep(blob){ // tự cắt vùng màn hình sáng + tăng tương phản + phóng to cho ảnh chụp bằng điện thoại
+async function prep(blob,full){ // tự cắt vùng màn hình sáng + tăng tương phản + phóng to cho ảnh chụp bằng điện thoại
   const img=await createImageBitmap(blob);const W=img.width,H=img.height;
-  const sw=240,sh=Math.max(1,Math.round(H*sw/W));const sc=document.createElement("canvas");sc.width=sw;sc.height=sh;
+  const sw=360,sh=Math.max(1,Math.round(H*sw/W));const sc=document.createElement("canvas");sc.width=sw;sc.height=sh;
   const sx=sc.getContext("2d",{willReadFrequently:true});sx.drawImage(img,0,0,sw,sh);const sd=sx.getImageData(0,0,sw,sh).data;
   const lum=(i)=>0.299*sd[i]+0.587*sd[i+1]+0.114*sd[i+2];
   const bright=(x,y)=>{const i=(y*sw+x)*4,l=lum(i),mx=Math.max(sd[i],sd[i+1],sd[i+2]),mn=Math.min(sd[i],sd[i+1],sd[i+2]);return l>150&&mx-mn<70;};
-  // hàng sáng liên tiếp dài nhất
-  const rowOK=[];for(let y=0;y<sh;y++){let c=0;for(let x=0;x<sw;x++)if(bright(x,y))c++;rowOK.push(c/sw>0.5);}
-  let best=[0,0],cur=-1,gap=0;for(let y=0;y<=sh;y++){if(y<sh&&rowOK[y]){if(cur<0)cur=y;gap=0;}else if(cur>=0){if(y<sh&&++gap<=3)continue;const e=y-gap;if(e-cur>best[1]-best[0])best=[cur,e];cur=-1;gap=0;}}
+  // các dải hàng sáng; chọn dải có nhiều nét chữ nhất (chuyển sáng→tối nhiều)
+  const rowOK=[],tr=[];for(let y=0;y<sh;y++){let c=0,n=0,prev=true;for(let x=0;x<sw;x++){const b=bright(x,y);if(b)c++;const i=(y*sw+x)*4,dk=lum(i)<125;if(prev&&dk)n++;prev=!dk;}rowOK.push(c/sw>0.45);tr.push(n);}
+  let best=[0,0],bestS=-1,cur=-1,gap=0;
+  for(let y=0;y<=sh;y++){if(y<sh&&rowOK[y]){if(cur<0)cur=y;gap=0;}else if(cur>=0){if(y<sh&&++gap<=4)continue;const e=y-gap;
+    if(e-cur>sh*0.06){let sc=0;for(let k=cur;k<e;k++)sc+=Math.min(tr[k],60);if(sc>bestS){bestS=sc;best=[cur,e];}}cur=-1;gap=0;}}
   let x0=0,x1=W,y0=0,y1=H;
-  if(best[1]-best[0]>sh*0.12){
+  if(!full&&best[1]-best[0]>sh*0.06){
     const colOK=[];for(let x=0;x<sw;x++){let c=0;for(let y=best[0];y<best[1];y++)if(bright(x,y))c++;colOK.push(c/(best[1]-best[0])>0.4);}
     let a=colOK.indexOf(true),b=colOK.lastIndexOf(true);if(a<0){a=0;b=sw-1;}
     x0=Math.max(0,Math.floor((a-2)*W/sw));x1=Math.min(W,Math.ceil((b+3)*W/sw));
@@ -718,36 +767,59 @@ async function prep(blob){ // tự cắt vùng màn hình sáng + tăng tương 
     let last=best[0];for(let y=best[0];y<best[1];y++){let d=0;for(let x=a;x<=b;x++){const i=(y*sw+x)*4;if(lum(i)<110)d++;}if(d>=2)last=y;}
     y1=Math.min(y1,Math.ceil((last+6)*H/sh));
   }
-  const cw=x1-x0,ch=y1-y0,k=Math.max(0.5,Math.min(2.5,2200/cw));
+  const cw=x1-x0,ch=y1-y0,k=Math.max(0.3,Math.min(2.5,2200/cw));
   const c=document.createElement("canvas");c.width=Math.round(cw*k);c.height=Math.round(ch*k);const x=c.getContext("2d",{willReadFrequently:true});
-  x.imageSmoothingQuality="high";x.filter=k>1.2?"blur(0.7px)":"none";x.drawImage(img,x0,y0,cw,ch,0,0,c.width,c.height);x.filter="none";
-  const d=x.getImageData(0,0,c.width,c.height),p=d.data,hist=new Uint32Array(256);
-  for(let i=0;i<p.length;i+=4){const g=(0.299*p[i]+0.587*p[i+1]+0.114*p[i+2])|0;p[i]=g;hist[g]++;}
+  x.imageSmoothingQuality="high";x.filter="grayscale(1)"+(/png|gif|bmp/i.test(blob.type)?"":" blur("+(k>1.2?0.9:0.6)+"px)");x.drawImage(img,x0,y0,cw,ch,0,0,c.width,c.height);x.filter="none";
+  // nền (độ sáng không đều) = ảnh mờ mạnh ở độ phân giải thấp
+  const bw=Math.max(8,Math.round(c.width/16)),bh=Math.max(8,Math.round(c.height/16));
+  const b=document.createElement("canvas");b.width=bw;b.height=bh;const bx=b.getContext("2d",{willReadFrequently:true});
+  bx.filter="blur(2px)";bx.drawImage(c,0,0,bw,bh);
+  const B=document.createElement("canvas");B.width=c.width;B.height=c.height;const Bx=B.getContext("2d",{willReadFrequently:true});
+  Bx.imageSmoothingQuality="high";Bx.drawImage(b,0,0,c.width,c.height);
+  const d=x.getImageData(0,0,c.width,c.height),p=d.data,q=Bx.getImageData(0,0,c.width,c.height).data,hist=new Uint32Array(256);
+  for(let i=0;i<p.length;i+=4){const g=Math.min(255,(p[i]/Math.max(30,q[i]))*235)|0;p[i]=g;hist[g]++;}
   const tot=p.length/4;let acc=0,lo=0,hi=255;for(let v=0;v<256;v++){acc+=hist[v];if(acc<tot*0.01)lo=v;if(acc<tot*0.97)hi=v;}
   const r=255/Math.max(20,hi-lo);for(let i=0;i<p.length;i+=4){const g=Math.max(0,Math.min(255,(p[i]-lo)*r));p[i]=p[i+1]=p[i+2]=g;}
   x.putImageData(d,0,0);window.__prep=c;return c;
 }
-async function ocrLocal(blob){setSt("Đang khởi động bộ đọc chữ… (lần đầu mất vài giây)");const w=await tessWorker();const {data}=await w.recognize(await prep(blob));window.__ocrRaw=data.text;return data.text;}
+function qaScore(text){const P=parseQA(text);const words=(P.q+" "+P.opts.join(" ")).split(/\s+/).filter(isWord).length;
+  let best=0;try{const F=searchFull(P.q,-1);if(F)for(const h of F.hits.slice(0,40)){if(h.ans)continue;const m=P.opts.length?optMatch(DB.rows[h.i],P.opts):0;
+    const v=(h.t<2?30:h.pct>=70?15:0)+m*20;if(v>best)best=v;}}catch(e){}
+  return best+Math.min(words,60)+(P.opts.length>=2?10:0);}
+async function ocrLocal(blob){setSt("Đang khởi động bộ đọc chữ… (lần đầu mất vài giây)");const w=await tessWorker();
+  const {data}=await w.recognize(await prep(blob,false));let text=data.text,sc=qaScore(text);
+  if(sc<100){setSt("Đọc lại toàn ảnh…");const r2=await w.recognize(await prep(blob,true));const sc2=qaScore(r2.data.text);if(sc2>sc){text=r2.data.text;sc=sc2;}}
+  window.__ocrRaw=text;return text;}
 async function ocrGemini(blob){
-  const j=await gemini([{text:"Trích xuất CÂU HỎI TRẮC NGHIỆM trong ảnh. Trả về JSON dạng {\"cau_hoi\":\"...\",\"phuong_an\":[\"...\"]}. Giữ nguyên chính tả tiếng Việt có dấu, bỏ số thứ tự câu (Câu 1:) và bỏ nhãn A./B./C./D. ở đầu phương án. Nếu ảnh có nhiều câu, chỉ lấy câu đầu tiên. Không trả lời câu hỏi."},
+  const j=await gemini([{text:`Ảnh là ảnh CHỤP MÀN HÌNH (thường chụp bằng điện thoại, có thể nghiêng, mờ, có sọc nhiễu moiré, lóa sáng) của bài thi trắc nghiệm nghiệp vụ Agribank trên hệ thống e-learning Saba.
+Nhiệm vụ: đọc CHÍNH XÁC câu hỏi đang hiển thị và các phương án trả lời.
+Quy tắc:
+- BỎ QUA: thanh trình duyệt/URL, tên người thi, "Câu hỏi x trong số 100", "Thời gian còn lại", dòng tiêu đề chuyên đề (vd "NV Kế toán Giao dịch khách hàng - Nhân viên (Kiểm tra Kỳ II/2026)"), các nút Trước/Tiếp theo/Nộp bài/Danh sách câu hỏi/OK, cửa sổ khác (Excel, Word…) và mọi thứ ngoài vùng bài thi.
+- Câu hỏi là đoạn chữ ngay dưới dòng tiêu đề chuyên đề, có thể dài 1–3 dòng. Nếu câu hỏi bị cắt ở mép ảnh, chỉ ghi phần nhìn thấy, KHÔNG tự bịa phần còn thiếu, và đặt "bi_cat": true.
+- Phương án là các dòng có nút tròn (radio) ở đầu, thường 4 dòng, KHÔNG có nhãn A/B/C/D. Giữ đúng thứ tự từ trên xuống. Không thêm nhãn.
+- Giữ nguyên chính tả tiếng Việt có dấu, số liệu, số hiệu văn bản (vd 369/QC-HĐTV-TCKT), dấu chấm phân cách hàng nghìn.
+- Nếu một phương án đang được chọn (nút tròn tô đậm) thì ghi số thứ tự (1-4) vào "dang_chon", không thì null.
+- Không trả lời câu hỏi.
+Trả về JSON: {"cau_hoi":"...","phuong_an":["...","..."],"bi_cat":false,"dang_chon":null}`},
     {inline_data:{mime_type:"image/jpeg",data:await small(blob)}}]);
-  const opts=(j.phuong_an||[]).map(String).filter(Boolean);
+  const opts=(j.phuong_an||[]).map(String).filter(Boolean);if(!String(j.cau_hoi||"").trim()&&!opts.length)return "";
   return String(j.cau_hoi||"")+(opts.length?"\n"+opts.map((o,i)=>L[i]+". "+o).join("\n"):"");
 }
 function setSt(s){$("imgSt").textContent=s;}
-let LASTIMG=null;
+let LASTIMG=null,LASTQF="";
 async function handleImage(blob){
   if(!blob)return;LASTIMG=blob;
   const th=$("thumb");th.src=URL.createObjectURL(blob);th.hidden=false;
-  const t0=performance.now();let text="",how="";
+  const t0=performance.now();let text="",how="",GERR="";
   try{
     if(CFG.key&&CFG.ocr){try{setSt("Đang đọc ảnh bằng Gemini…");text=await ocrGemini(blob);how="Gemini";}
-      catch(e){setSt("Gemini lỗi ("+e.message+") – chuyển sang bộ đọc trên máy…");}}
-    if(!text){text=await ocrLocal(blob);how="trên máy";}
+      catch(e){GERR=e.message;setSt("Gemini lỗi ("+e.message+") – chuyển sang bộ đọc trên máy…");}
+      if(CFG.key&&!text&&!GERR)GERR="Gemini không đọc được câu hỏi trong ảnh";}
+    if(!text){text=await ocrLocal(blob);how="trên máy"+(GERR?" (Gemini: "+GERR.slice(0,80)+")":"");}
   }catch(e){setSt("Không đọc được ảnh: "+e.message);return;}
   const P=parseQA(text);
   $("qf").value=P.q+(P.opts.length?"\n"+P.opts.slice(0,6).map((o,i)=>"ABCDEF"[i]+". "+o).join("\n"):"");
-  $("qi").value="";
+  $("qi").value="";LASTQF=$("qf").value;
   setSt(`✔ Đọc ${how} · ${((performance.now()-t0)/1000).toFixed(1)} s · ${P.opts.length} phương án — sửa trong ô Nội dung nếu đọc sai`);
   run();
   if(matchMedia("(max-width:760px),(pointer:coarse)").matches)$("out").scrollIntoView({behavior:"smooth"});else $("qf").focus();
@@ -799,6 +871,8 @@ Hãy trả lời câu hỏi trắc nghiệm sau. Trả về JSON: {"dap_an":"ch�
 Câu hỏi: ${P.q}
 ${P.opts.length?"Các phương án:\n"+P.opts.map((o,i)=>L[i]+". "+o).join("\n"):"(Không có phương án – hãy nêu câu trả lời ngắn gọn)"}`;
   try{const parts=[{text:prompt}];
+    if(LASTIMG&&$("qf").value===LASTQF){parts[0].text+="\n\nẢnh chụp đề gốc đính kèm: nếu phần chữ ở trên bị đọc sai/thiếu, hãy đọc lại từ ảnh (bỏ qua tên người thi, thời gian, cửa sổ khác) và trả lời theo đúng thứ tự phương án trong ảnh (từ trên xuống = A, B, C, D).";
+      parts.push({inline_data:{mime_type:"image/jpeg",data:await small(LASTIMG)}});}
     const r=await gemini(parts);AIC.set(k,{r,P});}
   catch(e){AIC.set(k,{err:e.message});}
   aiRefresh();
