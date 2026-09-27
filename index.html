@@ -618,6 +618,31 @@ function optCandidates(opts){ // chỉ mục ngược token phương án -> dòn
     const hit=new Set();toks.forEach(w=>OPIX.m.get(w).forEach(i=>hit.add(i)));hit.forEach(i=>cnt.set(i,(cnt.get(i)||0)+1));}
   return [...cnt].filter(([,c])=>c>=2).map(([i])=>i);
 }
+// độ giống 2 phương án (0..1), bắt buộc các con số phải khớp theo thứ tự
+function optScore(a,b){const ka=otk(a),kb=otk(b);if(!ka.A.length||!kb.A.length)return 0;
+  if(ka.A.join(" ")===kb.A.join(" "))return 1;
+  const dA=ka.D,dB=kb.D;const sub=(s,l)=>{let i=0;for(const w of l)if(i<s.length&&w===s[i])i++;return i===s.length;};
+  if((dA.length||dB.length)&&!(dA.length<=dB.length?sub(dA,dB):sub(dB,dA)))return 0;
+  let c=0;for(const w of ka.S)if(kb.S.has(w))c++;const mx=Math.max(ka.S.size,kb.S.size),mn=Math.min(ka.S.size,kb.S.size);
+  return Math.max(c/mx,(mn>=4?c/mn*0.9:0));}
+// ghép phương án trên đề (đọc từ ảnh) với phương án trong kho; chỉ trả chữ cái khi ghép được 1-1 trọn vẹn
+function mapOpts(exam,row){
+  const ro=[0,1,2,3].filter(k=>row[2+k]);const ans=ansOf(row);const kAns=L.indexOf((row[6]||"")[0]);
+  const pairs=[];exam.forEach((x,i)=>ro.forEach(k=>{const s=optScore(x,row[2+k]);if(s>=0.6)pairs.push({i,k,s});}));
+  pairs.sort((a,b)=>b.s-a.s);const ei=new Map(),rk=new Map();
+  for(const p of pairs){if(ei.has(p.i)||rk.has(p.k))continue;ei.set(p.i,p);rk.set(p.k,p);}
+  const text=ans;
+  if(kAns<0||!ro.includes(kAns))return {text,why:"câu trong kho không có chữ cái đáp án"};
+  const hit=rk.get(kAns);
+  const full=exam.length===ro.length&&ei.size===exam.length;
+  // phương án đúng phải vượt rõ các phương án khác trên đề
+  if(hit){const second=Math.max(0,...exam.map((x,i)=>i===hit.i?0:optScore(x,row[2+kAns])));
+    if(full&&(hit.s-second>=0.15||(hit.s===1&&second<1)))return {letter:"ABCDEF"[hit.i],text:exam[hit.i]};
+    const raw=s=>String(s).toLowerCase().normalize("NFC").replace(/\s+/g," ").trim();const same=exam.map((x,i)=>raw(x)===raw(row[2+kAns])?i:-1).filter(i=>i>=0);
+    if(full&&same.length===1)return {letter:"ABCDEF"[same[0]],text:exam[same[0]]};
+    return {text,why:full?"các phương án trên đề quá giống nhau – đối chiếu nội dung":"ảnh đọc thiếu/thừa phương án – đối chiếu nội dung"};}
+  return {text,why:"không thấy phương án đúng trong chữ đọc từ ảnh – đối chiếu nội dung"};
+}
 function optMatch(row,opts){let m=0;const ro=[row[2],row[3],row[4],row[5]].filter(Boolean);
   for(const o of opts)if(ro.some(x=>optSim(x,o)))m++;return m;}
 function trigrams(s){const g=new Set();for(let i=0;i+3<=s.length;i++)g.add(s.substr(i,3));return g;}
@@ -765,8 +790,9 @@ function card(h){
     :h.p===0?`<span class="fz b-start">Khớp đầu câu${cov}</span>`
     :`<span class="fz b-mid">Khớp giữa câu${cov}</span>`;o+="</span>";
   o+=`</div>`;
-  if(h.img>=(CUR.need||9)&&CUR.opts){const a=ansOf(r);const j=CUR.opts.findIndex(x=>sameAns(x,a)||wordSim(x,a)>=0.75);
-    if(j>=0)o+=`<div class="pick">👉 Trên đề chọn: ${"ABCDEF"[j]} · ${esc(CUR.opts[j].slice(0,60))}</div>`;}
+  if(h.img>=(CUR.need||9)&&CUR.opts){const M=mapOpts(CUR.opts,r);
+    if(M.letter)o+=`<div class="pick">👉 Trên đề chọn: ${M.letter} · ${esc(M.text.slice(0,60))}</div>`;
+    else if(M.text)o+=`<div class="pick" style="background:#e07b00">👉 Chọn phương án có nội dung: ${esc(M.text.slice(0,80))} <small>(${M.why})</small></div>`;}
   o+=`<div class="q">${Q.h}</div>`;
   let hasOpt=false;
   for(let k=0;k<4;k++){const t=r[2+k];if(!t)continue;hasOpt=true;
